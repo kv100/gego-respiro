@@ -47,9 +47,5 @@ RUN echo 'sql_database:\n  provider: sqlite\n  uri: /app/data/gego.db\n  databas
 # Expose port
 EXPOSE 8989
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ["/usr/local/bin/gego", "api", "--help"] || exit 1
-
 # Default command
 CMD ["/usr/local/bin/gego", "api", "--host", "0.0.0.0", "--port", "8989"]
