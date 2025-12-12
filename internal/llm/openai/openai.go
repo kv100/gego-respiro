@@ -16,13 +16,14 @@ import (
 
 // Provider implements the LLM Provider interface for OpenAI
 type Provider struct {
-	apiKey  string
-	baseURL string
-	client  openai.Client
+	apiKey            string
+	baseURL           string
+	client            openai.Client
+	systemInstruction string
 }
 
 // New creates a new OpenAI provider
-func New(apiKey, baseURL string) *Provider {
+func New(apiKey, baseURL, systemInstruction string) *Provider {
 	client := openai.NewClient(
 		option.WithAPIKey(apiKey),
 	)
@@ -35,9 +36,10 @@ func New(apiKey, baseURL string) *Provider {
 	}
 
 	return &Provider{
-		apiKey:  apiKey,
-		baseURL: baseURL,
-		client:  client,
+		apiKey:            apiKey,
+		baseURL:           baseURL,
+		client:            client,
+		systemInstruction: systemInstruction,
 	}
 }
 
@@ -69,21 +71,38 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 		maxTokens = 1000
 	}
 
+	messages := []openai.ChatCompletionMessageParamUnion{}
+
+	if p.systemInstruction != "" {
+		messages = append(messages, openai.ChatCompletionMessageParamUnion{
+			OfSystem: &openai.ChatCompletionSystemMessageParam{
+				Content: openai.ChatCompletionSystemMessageParamContentUnion{
+					OfString: openai.String(p.systemInstruction),
+				},
+			},
+		})
+	}
+
+	messages = append(messages, openai.ChatCompletionMessageParamUnion{
+		OfUser: &openai.ChatCompletionUserMessageParam{
+			Content: openai.ChatCompletionUserMessageParamContentUnion{
+				OfString: openai.String(prompt),
+			},
+		},
+	})
+
+	webSearchOptions := openai.ChatCompletionNewParamsWebSearchOptions{
+		SearchContextSize: "medium",
+	}
+
 	chatCompletion, err := p.client.Chat.Completions.New(
 		ctx,
 		openai.ChatCompletionNewParams{
-			Model: model,
-			Messages: []openai.ChatCompletionMessageParamUnion{
-				{
-					OfUser: &openai.ChatCompletionUserMessageParam{
-						Content: openai.ChatCompletionUserMessageParamContentUnion{
-							OfString: openai.String(prompt),
-						},
-					},
-				},
-			},
-			Temperature: openai.Float(temperature),
-			MaxTokens:   openai.Int(int64(maxTokens)),
+			Model:            model,
+			Messages:         messages,
+			WebSearchOptions: webSearchOptions,
+			Temperature:      openai.Float(temperature),
+			MaxTokens:        openai.Int(int64(maxTokens)),
 		},
 	)
 	if err != nil {

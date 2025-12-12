@@ -101,10 +101,10 @@ and compare performance across different LLM providers.`,
 		statsService = services.NewStatsService(database)
 
 		llmRegistry = llm.NewRegistry()
-		llmRegistry.Register(openai.New("", ""))
+		llmRegistry.Register(openai.New("", "", config.GetSystemInstruction(cfg, config.ProviderChatGPT)))
 		llmRegistry.Register(anthropic.New("", ""))
 		llmRegistry.Register(ollama.New(""))
-		llmRegistry.Register(google.New("", ""))
+		llmRegistry.Register(google.New("", "", config.GetSystemInstruction(cfg, config.ProviderGemini)))
 		llmRegistry.Register(perplexity.New("", ""))
 
 		sched = services.NewSchedulerService(database, llmRegistry)
@@ -149,18 +149,21 @@ func initializeLLMProviders(ctx context.Context) error {
 		return fmt.Errorf("failed to list LLMs: %w", err)
 	}
 
+	geminiSystemInstruction := config.GetSystemInstruction(cfg, config.ProviderGemini)
+	chatGPTSystemInstruction := config.GetSystemInstruction(cfg, config.ProviderChatGPT)
+
 	for _, llmConfig := range llms {
 		var provider llm.Provider
 
 		switch llmConfig.Provider {
 		case "openai":
-			provider = openai.New(llmConfig.APIKey, llmConfig.BaseURL)
+			provider = openai.New(llmConfig.APIKey, llmConfig.BaseURL, chatGPTSystemInstruction)
 		case "anthropic":
 			provider = anthropic.New(llmConfig.APIKey, llmConfig.BaseURL)
 		case "ollama":
 			provider = ollama.New(llmConfig.BaseURL)
 		case "google":
-			provider = google.New(llmConfig.APIKey, llmConfig.BaseURL)
+			provider = google.New(llmConfig.APIKey, llmConfig.BaseURL, geminiSystemInstruction)
 		case "perplexity":
 			provider = perplexity.New(llmConfig.APIKey, llmConfig.BaseURL)
 		default:

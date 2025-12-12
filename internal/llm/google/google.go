@@ -14,13 +14,14 @@ import (
 
 // Provider implements the LLM Provider interface for Google AI
 type Provider struct {
-	apiKey  string
-	baseURL string
-	client  *genai.Client
+	apiKey            string
+	baseURL           string
+	client            *genai.Client
+	systemInstruction string
 }
 
 // New creates a new Google provider
-func New(apiKey, baseURL string) *Provider {
+func New(apiKey, baseURL, systemInstruction string) *Provider {
 	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
 		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,
@@ -30,9 +31,10 @@ func New(apiKey, baseURL string) *Provider {
 	}
 
 	return &Provider{
-		apiKey:  apiKey,
-		baseURL: baseURL,
-		client:  client,
+		apiKey:            apiKey,
+		baseURL:           baseURL,
+		client:            client,
+		systemInstruction: systemInstruction,
 	}
 }
 
@@ -63,10 +65,13 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 		maxTokens = 1000
 	}
 
-	systemInstruction := &genai.Content{
-		Parts: []*genai.Part{
-			{Text: "You are Gemini, a helpful, concise, and friendly assistant. Respond conversationally and safely, the way the Gemini chat experience behaves. Focus on clear, direct answers that follow user intent."},
-		},
+	var systemInstructionContent *genai.Content
+	if p.systemInstruction != "" {
+		systemInstructionContent = &genai.Content{
+			Parts: []*genai.Part{
+				{Text: p.systemInstruction},
+			},
+		}
 	}
 
 	safetySettings := []*genai.SafetySetting{
@@ -98,7 +103,7 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 	}
 
 	generationConfig := &genai.GenerateContentConfig{
-		SystemInstruction: systemInstruction,
+		SystemInstruction: systemInstructionContent,
 		Temperature:       float32Ptr(float32(config.Temperature)),
 		TopP:              float32Ptr(float32(config.TopP)),
 		TopK:              float32Ptr(float32(config.TopK)),

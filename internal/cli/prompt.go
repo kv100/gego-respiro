@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
+	"github.com/AI2HU/gego/internal/config"
 	"github.com/AI2HU/gego/internal/llm"
 	"github.com/AI2HU/gego/internal/llm/anthropic"
 	"github.com/AI2HU/gego/internal/llm/google"
@@ -429,13 +430,15 @@ func runPromptGenerate(reader *bufio.Reader, ctx context.Context) error {
 	var provider llm.Provider
 	switch selectedLLM.Provider {
 	case "openai":
-		provider = openai.New(selectedLLM.APIKey, selectedLLM.BaseURL)
+		chatGPTSystemInstruction := config.GetSystemInstruction(cfg, config.ProviderChatGPT)
+		provider = openai.New(selectedLLM.APIKey, selectedLLM.BaseURL, chatGPTSystemInstruction)
 	case "anthropic":
 		provider = anthropic.New(selectedLLM.APIKey, selectedLLM.BaseURL)
 	case "ollama":
 		provider = ollama.New(selectedLLM.BaseURL)
 	case "google":
-		provider = google.New(selectedLLM.APIKey, selectedLLM.BaseURL)
+		geminiSystemInstruction := config.GetSystemInstruction(cfg, config.ProviderGemini)
+		provider = google.New(selectedLLM.APIKey, selectedLLM.BaseURL, geminiSystemInstruction)
 	default:
 		return fmt.Errorf("unsupported LLM provider: %s", selectedLLM.Provider)
 	}
