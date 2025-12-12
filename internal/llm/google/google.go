@@ -58,6 +58,25 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 		model = config.Model
 	}
 
+	maxTokens := int32(config.MaxTokens)
+	if maxTokens <= 0 {
+		maxTokens = 1000
+	}
+
+	systemInstruction := &genai.Content{
+		Parts: []*genai.Part{
+			{Text: "You are Gemini, a helpful, concise, and friendly assistant. Respond conversationally and safely, the way the Gemini chat experience behaves. Focus on clear, direct answers that follow user intent."},
+		},
+	}
+
+	safetySettings := []*genai.SafetySetting{
+		{Category: genai.HarmCategoryHarassment, Threshold: genai.HarmBlockThresholdBlockMediumAndAbove},
+		{Category: genai.HarmCategoryHateSpeech, Threshold: genai.HarmBlockThresholdBlockMediumAndAbove},
+		{Category: genai.HarmCategorySexuallyExplicit, Threshold: genai.HarmBlockThresholdBlockMediumAndAbove},
+		{Category: genai.HarmCategoryDangerousContent, Threshold: genai.HarmBlockThresholdBlockMediumAndAbove},
+		{Category: genai.HarmCategoryCivicIntegrity, Threshold: genai.HarmBlockThresholdBlockMediumAndAbove},
+	}
+
 	client := p.client
 	if client == nil {
 		var err error
@@ -79,14 +98,23 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 	}
 
 	generationConfig := &genai.GenerateContentConfig{
-		Temperature: float32Ptr(float32(config.Temperature)),
-		TopP:        float32Ptr(float32(config.TopP)),
-		TopK:        float32Ptr(float32(config.TopK)),
+		SystemInstruction: systemInstruction,
+		Temperature:       float32Ptr(float32(config.Temperature)),
+		TopP:              float32Ptr(float32(config.TopP)),
+		TopK:              float32Ptr(float32(config.TopK)),
+		MaxOutputTokens:   maxTokens,
+		SafetySettings:    safetySettings,
+		ResponseModalities: []string{
+			"TEXT",
+		},
+		Tools: []*genai.Tool{
+			{GoogleSearch: &genai.GoogleSearch{}},
+		},
 	}
 
 	result, err := client.Models.GenerateContent(ctx, model, content, generationConfig)
 	if err != nil {
-		return nil, fmt.Errorf("Google AI API error: %v", err)
+		return nil, fmt.Errorf("google AI API error: %v", err)
 	}
 
 	var generatedText string
