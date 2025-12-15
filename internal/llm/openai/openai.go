@@ -117,7 +117,7 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 		for index, annotation := range message.Annotations {
 			if annotation.URLCitation.URL != "" {
 				searchURLs = append(searchURLs, llm.SearchURL{
-					SearchQuery:   "unknown",
+					SearchQuery:   llm.UnknownSearchQuery,
 					URL:           annotation.URLCitation.URL,
 					Title:         annotation.URLCitation.Title,
 					CitationIndex: index,

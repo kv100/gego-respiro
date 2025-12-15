@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/AI2HU/gego/internal/llm"
 	"github.com/AI2HU/gego/internal/models"
 	"github.com/AI2HU/gego/internal/services"
 	"github.com/AI2HU/gego/internal/shared"
@@ -213,6 +214,19 @@ func displayVerboseInfo(response *models.Response) {
 	if response.ResponseText != "" {
 		fmt.Printf("%sResponse:%s\n", LabelStyle, Reset)
 		fmt.Printf("%s%s%s\n", DimStyle, response.ResponseText, Reset)
+	}
+
+	if len(response.SearchURLs) > 0 {
+		fmt.Printf("%sSearch URLs:%s\n", LabelStyle, Reset)
+		for i, url := range response.SearchURLs {
+			fmt.Printf("  %s%d.%s %s\n", DimStyle, i+1, Reset, FormatValue(url.URL))
+			if url.Title != "" {
+				fmt.Printf("     %sTitle:%s %s\n", DimStyle, Reset, FormatValue(url.Title))
+			}
+			if url.SearchQuery != "" && url.SearchQuery != llm.UnknownSearchQuery {
+				fmt.Printf("     %sQuery:%s %s\n", DimStyle, Reset, FormatValue(url.SearchQuery))
+			}
+		}
 	}
 
 	fmt.Printf("%s%s%s\n", DimStyle, separatorLine, Reset)

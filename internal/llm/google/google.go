@@ -3,7 +3,9 @@ package google
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"google.golang.org/genai"
 
@@ -138,9 +140,10 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 		if candidate.GroundingMetadata != nil {
 			for index, chunk := range candidate.GroundingMetadata.GroundingChunks {
 				if chunk.Web != nil && chunk.Web.URI != "" {
+					resolvedURL := resolveRedirectURL(ctx, chunk.Web.URI)
 					searchURLs = append(searchURLs, llm.SearchURL{
 						SearchQuery:   searchQuery,
-						URL:           chunk.Web.URI,
+						URL:           resolvedURL,
 						Title:         chunk.Web.Title,
 						CitationIndex: index,
 					})
@@ -155,9 +158,10 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 			}
 			for index, urlMeta := range candidate.URLContextMetadata.URLMetadata {
 				if urlMeta.RetrievedURL != "" {
+					resolvedURL := resolveRedirectURL(ctx, urlMeta.RetrievedURL)
 					searchURLs = append(searchURLs, llm.SearchURL{
 						SearchQuery:   searchQuery,
-						URL:           urlMeta.RetrievedURL,
+						URL:           resolvedURL,
 						Title:         "",
 						CitationIndex: groundingChunkCount + index,
 					})
@@ -226,4 +230,35 @@ func (p *Provider) ListModels(ctx context.Context, apiKey, baseURL string) ([]mo
 
 func float32Ptr(f float32) *float32 {
 	return &f
+}
+
+// resolveRedirectURL follows HTTP redirects to get the actual destination URL
+func resolveRedirectURL(ctx context.Context, url string) string {
+	if !strings.HasPrefix(url, "https://vertexaisearch.cloud.google.com/grounding-api-redirect/") {
+		return url
+	}
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return nil
+		},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
+	if err != nil {
+		return url
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return url
+	}
+	defer resp.Body.Close()
+
+	if resp.Request != nil && resp.Request.URL != nil {
+		return resp.Request.URL.String()
+	}
+
+	return url
 }

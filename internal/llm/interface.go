@@ -19,6 +19,8 @@ type Config struct {
 	Stream      bool    `json:"stream"`
 }
 
+const UnknownSearchQuery = "unknown"
+
 // DefaultConfig returns a config with sensible defaults
 func DefaultConfig() Config {
 	return Config{
