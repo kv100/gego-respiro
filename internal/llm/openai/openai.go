@@ -7,6 +7,7 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 
 	"github.com/AI2HU/gego/internal/llm"
@@ -68,67 +69,78 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 		maxTokens = 1000
 	}
 
-	messages := []openai.ChatCompletionMessageParamUnion{}
-
+	inputText := prompt
+	instructions := ""
 	if p.systemInstruction != "" {
-		messages = append(messages, openai.ChatCompletionMessageParamUnion{
-			OfSystem: &openai.ChatCompletionSystemMessageParam{
-				Content: openai.ChatCompletionSystemMessageParamContentUnion{
-					OfString: openai.String(p.systemInstruction),
-				},
-			},
-		})
+		instructions = p.systemInstruction
 	}
 
-	messages = append(messages, openai.ChatCompletionMessageParamUnion{
-		OfUser: &openai.ChatCompletionUserMessageParam{
-			Content: openai.ChatCompletionUserMessageParamContentUnion{
-				OfString: openai.String(prompt),
-			},
+	responseParams := responses.ResponseNewParams{
+		Model: responses.ChatModel(model),
+		Input: responses.ResponseNewParamsInputUnion{
+			OfString: openai.String(inputText),
 		},
-	})
-
-	webSearchOptions := openai.ChatCompletionNewParamsWebSearchOptions{
-		SearchContextSize: "medium",
+		Tools: []responses.ToolUnionParam{
+			responses.ToolParamOfWebSearch(responses.WebSearchToolTypeWebSearch),
+		},
+		ToolChoice: responses.ResponseNewParamsToolChoiceUnion{
+			OfToolChoiceMode: openai.Opt(responses.ToolChoiceOptionsRequired),
+		},
+		Include: []responses.ResponseIncludable{
+			"web_search_call.action.sources",
+		},
 	}
 
-	chatCompletion, err := p.client.Chat.Completions.New(
-		ctx,
-		openai.ChatCompletionNewParams{
-			Model:            model,
-			Messages:         messages,
-			WebSearchOptions: webSearchOptions,
-			Temperature:      openai.Float(temperature),
-			MaxTokens:        openai.Int(int64(maxTokens)),
-		},
-	)
+	if instructions != "" {
+		responseParams.Instructions = openai.String(instructions)
+	}
+
+	modelStr := strings.ToLower(string(model))
+	supportsTemperature := !strings.HasPrefix(modelStr, "gpt-5") && !strings.HasPrefix(modelStr, "o1") && !strings.HasPrefix(modelStr, "o3")
+
+	if temperature > 0 && supportsTemperature {
+		responseParams.Temperature = openai.Float(temperature)
+	}
+
+	if maxTokens > 0 {
+		responseParams.MaxOutputTokens = openai.Int(int64(maxTokens))
+	}
+
+	resp, err := p.client.Responses.New(ctx, responseParams)
 	if err != nil {
 		return nil, fmt.Errorf("OpenAI API error: %w", err)
 	}
 
-	var generatedText string
-	if len(chatCompletion.Choices) > 0 && chatCompletion.Choices[0].Message.Content != "" {
-		generatedText = chatCompletion.Choices[0].Message.Content
-	}
+	generatedText := resp.OutputText()
 
 	var searchURLs []llm.SearchURL
-	if len(chatCompletion.Choices) > 0 {
-		message := chatCompletion.Choices[0].Message
-		for index, annotation := range message.Annotations {
-			if annotation.URLCitation.URL != "" {
-				searchURLs = append(searchURLs, llm.SearchURL{
-					SearchQuery:   llm.UnknownSearchQuery,
-					URL:           annotation.URLCitation.URL,
-					Title:         annotation.URLCitation.Title,
-					CitationIndex: index,
-				})
+	for _, outputItem := range resp.Output {
+		if outputItem.Type == "web_search_call" {
+			searchQuery := llm.UnknownSearchQuery
+			if outputItem.Action.Query != "" {
+				searchQuery = outputItem.Action.Query
+			}
+
+			if outputItem.Action.Type == "search" || outputItem.Action.Type == "web_search" {
+				if len(outputItem.Action.Sources) > 0 {
+					for index, source := range outputItem.Action.Sources {
+						if source.URL != "" {
+							searchURLs = append(searchURLs, llm.SearchURL{
+								SearchQuery:   searchQuery,
+								URL:           source.URL,
+								Title:         "",
+								CitationIndex: index,
+							})
+						}
+					}
+				}
 			}
 		}
 	}
 
 	tokensUsed := 0
-	if chatCompletion.Usage.TotalTokens != 0 {
-		tokensUsed = int(chatCompletion.Usage.TotalTokens)
+	if resp.Usage.TotalTokens != 0 {
+		tokensUsed = int(resp.Usage.TotalTokens)
 	}
 
 	return &llm.Response{
