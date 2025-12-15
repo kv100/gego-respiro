@@ -396,7 +396,6 @@ func (s *SchedulerService) executePromptWithLLM(ctx context.Context, scheduleID 
 			Temperature: temperature,
 			Error:       err.Error(),
 			ScheduleID:  scheduleID,
-			LatencyMs:   time.Since(startTime).Milliseconds(),
 			CreatedAt:   time.Now(),
 		}
 		return s.db.CreateResponse(ctx, response)
@@ -416,9 +415,20 @@ func (s *SchedulerService) executePromptWithLLM(ctx context.Context, scheduleID 
 		Temperature:  temperature,
 		ScheduleID:   scheduleID,
 		TokensUsed:   resp.TokensUsed,
-		LatencyMs:    resp.LatencyMs,
 		Error:        resp.Error,
 		CreatedAt:    time.Now(),
+	}
+
+	if len(resp.SearchURLs) > 0 {
+		response.SearchURLs = make([]models.SearchURL, len(resp.SearchURLs))
+		for i, url := range resp.SearchURLs {
+			response.SearchURLs[i] = models.SearchURL{
+				SearchQuery:   url.SearchQuery,
+				URL:           url.URL,
+				Title:         url.Title,
+				CitationIndex: url.CitationIndex,
+			}
+		}
 	}
 
 	return s.db.CreateResponse(ctx, response)

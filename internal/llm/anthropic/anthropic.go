@@ -50,8 +50,6 @@ func (p *Provider) Validate(config map[string]string) error {
 
 // Generate sends a prompt to Anthropic and returns the response
 func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Config) (*llm.Response, error) {
-	startTime := time.Now()
-
 	model := "claude-3-7-sonnet-20250219"
 	if config.Model != "" {
 		model = config.Model
@@ -125,7 +123,6 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 	return &llm.Response{
 		Text:       anthropicResp.Content[0].Text,
 		TokensUsed: totalTokens,
-		LatencyMs:  time.Since(startTime).Milliseconds(),
 		Model:      anthropicResp.Model,
 		Provider:   "anthropic",
 	}, nil

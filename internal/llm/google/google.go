@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"google.golang.org/genai"
 
@@ -53,8 +52,6 @@ func (p *Provider) Validate(config map[string]string) error {
 
 // Generate sends a prompt to Google AI and returns the response
 func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Config) (*llm.Response, error) {
-	startTime := time.Now()
-
 	model := "gemini-1.5-flash"
 	if config.Model != "" {
 		model = config.Model
@@ -129,6 +126,46 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 		}
 	}
 
+	var searchURLs []llm.SearchURL
+	if len(result.Candidates) > 0 {
+		candidate := result.Candidates[0]
+
+		var searchQuery string
+		if candidate.GroundingMetadata != nil && len(candidate.GroundingMetadata.WebSearchQueries) > 0 {
+			searchQuery = candidate.GroundingMetadata.WebSearchQueries[0]
+		}
+
+		if candidate.GroundingMetadata != nil {
+			for index, chunk := range candidate.GroundingMetadata.GroundingChunks {
+				if chunk.Web != nil && chunk.Web.URI != "" {
+					searchURLs = append(searchURLs, llm.SearchURL{
+						SearchQuery:   searchQuery,
+						URL:           chunk.Web.URI,
+						Title:         chunk.Web.Title,
+						CitationIndex: index,
+					})
+				}
+			}
+		}
+
+		if candidate.URLContextMetadata != nil {
+			groundingChunkCount := 0
+			if candidate.GroundingMetadata != nil {
+				groundingChunkCount = len(candidate.GroundingMetadata.GroundingChunks)
+			}
+			for index, urlMeta := range candidate.URLContextMetadata.URLMetadata {
+				if urlMeta.RetrievedURL != "" {
+					searchURLs = append(searchURLs, llm.SearchURL{
+						SearchQuery:   searchQuery,
+						URL:           urlMeta.RetrievedURL,
+						Title:         "",
+						CitationIndex: groundingChunkCount + index,
+					})
+				}
+			}
+		}
+	}
+
 	tokensUsed := 0
 	if result.UsageMetadata != nil {
 		tokensUsed = int(result.UsageMetadata.TotalTokenCount)
@@ -137,9 +174,9 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 	return &llm.Response{
 		Text:       generatedText,
 		TokensUsed: tokensUsed,
-		LatencyMs:  time.Since(startTime).Milliseconds(),
 		Model:      model,
 		Provider:   "google",
+		SearchURLs: searchURLs,
 	}, nil
 }
 

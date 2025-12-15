@@ -47,14 +47,22 @@ type Provider interface {
 	ListModels(ctx context.Context, apiKey, baseURL string) ([]models.ModelInfo, error)
 }
 
+// SearchURL represents a URL from web search with metadata
+type SearchURL struct {
+	SearchQuery   string `json:"search_query"`
+	URL           string `json:"url"`
+	Title         string `json:"title"`
+	CitationIndex int    `json:"citation_index"`
+}
+
 // Response represents an LLM response
 type Response struct {
 	Text       string
 	TokensUsed int
-	LatencyMs  int64
 	Model      string
 	Provider   string
 	Error      string
+	SearchURLs []SearchURL `json:"search_urls,omitempty"`
 }
 
 // Registry manages LLM providers

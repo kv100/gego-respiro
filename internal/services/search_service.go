@@ -186,20 +186,13 @@ func (s *SearchService) GetResponseStats(ctx context.Context) (*ResponseStats, e
 		ByPrompt:       make(map[string]int),
 		ByLLM:          make(map[string]int),
 		TotalTokens:    0,
-		AvgLatency:     0,
 	}
 
-	var totalLatency int64
 	for _, response := range responses {
 		stats.ByProvider[response.LLMProvider]++
 		stats.ByPrompt[response.PromptID]++
 		stats.ByLLM[response.LLMID]++
 		stats.TotalTokens += response.TokensUsed
-		totalLatency += response.LatencyMs
-	}
-
-	if len(responses) > 0 {
-		stats.AvgLatency = float64(totalLatency) / float64(len(responses))
 	}
 
 	return stats, nil
@@ -212,7 +205,6 @@ type ResponseStats struct {
 	ByPrompt       map[string]int `json:"by_prompt"`
 	ByLLM          map[string]int `json:"by_llm"`
 	TotalTokens    int            `json:"total_tokens"`
-	AvgLatency     float64        `json:"avg_latency"`
 }
 
 // HighlightKeyword highlights a keyword in text

@@ -290,18 +290,68 @@ func (m *MongoDB) CreateResponse(ctx context.Context, response *models.Response)
 		doc["metadata"] = response.Metadata
 	}
 
+	if len(response.SearchURLs) > 0 {
+		var searchURLs []bson.M
+		for _, url := range response.SearchURLs {
+			searchURLs = append(searchURLs, bson.M{
+				"search_query":   url.SearchQuery,
+				"url":            url.URL,
+				"title":          url.Title,
+				"citation_index": url.CitationIndex,
+			})
+		}
+		doc["search_urls"] = searchURLs
+	}
+
 	_, err := m.database.Collection(collResponses).InsertOne(ctx, doc)
 	return err
 }
 
 // GetResponse retrieves a response by ID
 func (m *MongoDB) GetResponse(ctx context.Context, id string) (*models.Response, error) {
-	var response models.Response
-	err := m.database.Collection(collResponses).FindOne(ctx, bson.M{"_id": id}).Decode(&response)
+	var doc bson.M
+	err := m.database.Collection(collResponses).FindOne(ctx, bson.M{"_id": id}).Decode(&doc)
 	if err == mongo.ErrNoDocuments {
 		return nil, fmt.Errorf("response not found: %s", id)
 	}
-	return &response, err
+	if err != nil {
+		return nil, err
+	}
+
+	response := &models.Response{
+		ID:           getString(doc, "_id"),
+		PromptID:     getString(doc, "prompt_id"),
+		PromptText:   getString(doc, "prompt_text"),
+		LLMID:        getString(doc, "llm_id"),
+		LLMName:      getString(doc, "llm_name"),
+		LLMProvider:  getString(doc, "llm_provider"),
+		LLMModel:     getString(doc, "llm_model"),
+		ResponseText: getString(doc, "response_text"),
+		Temperature:  getFloat64(doc, "temperature"),
+		ScheduleID:   getString(doc, "schedule_id"),
+		TokensUsed:   getInt(doc, "tokens_used"),
+		Error:        getString(doc, "error"),
+		CreatedAt:    getTime(doc, "created_at"),
+	}
+
+	if metadata, ok := doc["metadata"].(map[string]interface{}); ok {
+		response.Metadata = metadata
+	}
+
+	if searchURLs, ok := doc["search_urls"].([]interface{}); ok {
+		for _, urlDoc := range searchURLs {
+			if urlMap, ok := urlDoc.(bson.M); ok {
+				response.SearchURLs = append(response.SearchURLs, models.SearchURL{
+					SearchQuery:   getString(urlMap, "search_query"),
+					URL:           getString(urlMap, "url"),
+					Title:         getString(urlMap, "title"),
+					CitationIndex: getInt(urlMap, "citation_index"),
+				})
+			}
+		}
+	}
+
+	return response, nil
 }
 
 // ListResponses lists responses with filtering
@@ -431,6 +481,60 @@ func getTime(doc bson.M, key string) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+func getInt(doc bson.M, key string) int {
+	if val, ok := doc[key]; ok && val != nil {
+		if i, ok := val.(int32); ok {
+			return int(i)
+		}
+		if i, ok := val.(int64); ok {
+			return int(i)
+		}
+		if i, ok := val.(int); ok {
+			return i
+		}
+		if f, ok := val.(float64); ok {
+			return int(f)
+		}
+	}
+	return 0
+}
+
+func getInt64(doc bson.M, key string) int64 {
+	if val, ok := doc[key]; ok && val != nil {
+		if i, ok := val.(int64); ok {
+			return i
+		}
+		if i, ok := val.(int32); ok {
+			return int64(i)
+		}
+		if i, ok := val.(int); ok {
+			return int64(i)
+		}
+		if f, ok := val.(float64); ok {
+			return int64(f)
+		}
+	}
+	return 0
+}
+
+func getFloat64(doc bson.M, key string) float64 {
+	if val, ok := doc[key]; ok && val != nil {
+		if f, ok := val.(float64); ok {
+			return f
+		}
+		if f, ok := val.(float32); ok {
+			return float64(f)
+		}
+		if i, ok := val.(int); ok {
+			return float64(i)
+		}
+		if i, ok := val.(int64); ok {
+			return float64(i)
+		}
+	}
+	return 0
 }
 
 // DeleteAllResponses deletes all responses from the database

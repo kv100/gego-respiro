@@ -3,7 +3,6 @@ package perplexity
 import (
 	"context"
 	"fmt"
-	"time"
 
 	pplx "github.com/sgaunet/perplexity-go/v2"
 
@@ -48,8 +47,6 @@ func (p *Provider) Validate(config map[string]string) error {
 
 // Generate sends a prompt to Perplexity and returns the response
 func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Config) (*llm.Response, error) {
-	startTime := time.Now()
-
 	model := "sonar"
 	if config.Model != "" {
 		model = config.Model
@@ -95,7 +92,6 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 	return &llm.Response{
 		Text:       content,
 		TokensUsed: tokensUsed,
-		LatencyMs:  time.Since(startTime).Milliseconds(),
 		Model:      model,
 		Provider:   "perplexity",
 	}, nil

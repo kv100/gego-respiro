@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -58,8 +57,6 @@ func (p *Provider) Validate(config map[string]string) error {
 
 // Generate sends a prompt to OpenAI and returns the response
 func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Config) (*llm.Response, error) {
-	startTime := time.Now()
-
 	model := shared.ChatModelGPT3_5Turbo
 	if config.Model != "" {
 		model = shared.ChatModel(config.Model)
@@ -114,6 +111,21 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 		generatedText = chatCompletion.Choices[0].Message.Content
 	}
 
+	var searchURLs []llm.SearchURL
+	if len(chatCompletion.Choices) > 0 {
+		message := chatCompletion.Choices[0].Message
+		for index, annotation := range message.Annotations {
+			if annotation.URLCitation.URL != "" {
+				searchURLs = append(searchURLs, llm.SearchURL{
+					SearchQuery:   "unknown",
+					URL:           annotation.URLCitation.URL,
+					Title:         annotation.URLCitation.Title,
+					CitationIndex: index,
+				})
+			}
+		}
+	}
+
 	tokensUsed := 0
 	if chatCompletion.Usage.TotalTokens != 0 {
 		tokensUsed = int(chatCompletion.Usage.TotalTokens)
@@ -122,9 +134,9 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 	return &llm.Response{
 		Text:       generatedText,
 		TokensUsed: tokensUsed,
-		LatencyMs:  time.Since(startTime).Milliseconds(),
 		Model:      string(model),
 		Provider:   "openai",
+		SearchURLs: searchURLs,
 	}, nil
 }
 

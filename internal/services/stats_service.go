@@ -205,7 +205,6 @@ func (s *StatsService) GetProviderStats(ctx context.Context) (map[string]*Provid
 				Provider:       response.LLMProvider,
 				TotalResponses: 0,
 				TotalTokens:    0,
-				TotalLatency:   0,
 				UniquePrompts:  make(map[string]bool),
 				UniqueLLMs:     make(map[string]bool),
 			}
@@ -214,7 +213,6 @@ func (s *StatsService) GetProviderStats(ctx context.Context) (map[string]*Provid
 		stats := providerStats[response.LLMProvider]
 		stats.TotalResponses++
 		stats.TotalTokens += response.TokensUsed
-		stats.TotalLatency += response.LatencyMs
 		stats.UniquePrompts[response.PromptID] = true
 		stats.UniqueLLMs[response.LLMID] = true
 	}
@@ -222,7 +220,6 @@ func (s *StatsService) GetProviderStats(ctx context.Context) (map[string]*Provid
 	for _, stats := range providerStats {
 		if stats.TotalResponses > 0 {
 			stats.AvgTokens = float64(stats.TotalTokens) / float64(stats.TotalResponses)
-			stats.AvgLatency = float64(stats.TotalLatency) / float64(stats.TotalResponses)
 		}
 		stats.UniquePromptCount = len(stats.UniquePrompts)
 		stats.UniqueLLMCount = len(stats.UniqueLLMs)
@@ -236,9 +233,7 @@ type ProviderStats struct {
 	Provider          string          `json:"provider"`
 	TotalResponses    int             `json:"total_responses"`
 	TotalTokens       int             `json:"total_tokens"`
-	TotalLatency      int64           `json:"total_latency"`
 	AvgTokens         float64         `json:"avg_tokens"`
-	AvgLatency        float64         `json:"avg_latency"`
 	UniquePromptCount int             `json:"unique_prompt_count"`
 	UniqueLLMCount    int             `json:"unique_llm_count"`
 	UniquePrompts     map[string]bool `json:"-"`

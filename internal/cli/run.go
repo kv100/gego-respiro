@@ -21,6 +21,12 @@ func boolPtr(b bool) *bool {
 	return &b
 }
 
+var (
+	verboseFlag bool
+)
+
+const separatorLine = "────────────────────────────────────────────────────────────────────────────"
+
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run all prompts with all LLMs once",
@@ -36,6 +42,10 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	return runOnceMode(ctx)
+}
+
+func init() {
+	runCmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "Display detailed information including LLM responses")
 }
 
 func runOnceMode(ctx context.Context) error {
@@ -116,11 +126,14 @@ func runOnceMode(ctx context.Context) error {
 				RetryDelay:  30 * time.Second,
 			}
 
-			_, err := executionService.ExecutePromptWithLLM(ctx, prompt, llm, config)
+			response, err := executionService.ExecutePromptWithLLM(ctx, prompt, llm, config)
 			if err != nil {
 				fmt.Printf("%s❌ Failed: %s%s\n", ErrorStyle, FormatValue(err.Error()), Reset)
 			} else {
 				fmt.Printf("%s✅ Success%s\n", SuccessStyle, Reset)
+				if verboseFlag && response != nil {
+					displayVerboseInfo(response)
+				}
 			}
 
 			completedExecutions++
@@ -181,4 +194,27 @@ func filterNewPrompts(ctx context.Context, prompts []*models.Prompt) ([]*models.
 	}
 
 	return newPrompts, nil
+}
+
+// displayVerboseInfo displays detailed information about the LLM response
+func displayVerboseInfo(response *models.Response) {
+	fmt.Printf("%s%s%s\n", DimStyle, separatorLine, Reset)
+	fmt.Printf("%s📄 Response Details%s\n", InfoStyle, Reset)
+	fmt.Printf("%s%s%s\n", DimStyle, separatorLine, Reset)
+
+	if response.LLMModel != "" {
+		fmt.Printf("%sModel: %s%s\n", LabelStyle, FormatValue(response.LLMModel), Reset)
+	}
+
+	if response.TokensUsed > 0 {
+		fmt.Printf("%sTokens Used: %s%s\n", LabelStyle, FormatCount(response.TokensUsed), Reset)
+	}
+
+	if response.ResponseText != "" {
+		fmt.Printf("%sResponse:%s\n", LabelStyle, Reset)
+		fmt.Printf("%s%s%s\n", DimStyle, response.ResponseText, Reset)
+	}
+
+	fmt.Printf("%s%s%s\n", DimStyle, separatorLine, Reset)
+	fmt.Println()
 }
