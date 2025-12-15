@@ -77,4 +77,5 @@ type ModelInfo struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	UsedInChat  bool   `json:"used_in_chat,omitempty"`
 }

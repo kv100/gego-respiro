@@ -200,6 +200,15 @@ func (p *Provider) ListModels(ctx context.Context, apiKey, baseURL string) ([]mo
 	}
 
 	var modelList []models.ModelInfo
+	var popularModels []models.ModelInfo
+	popularModelIDs := map[string]bool{
+		"gemini-1.5-flash":     true,
+		"gemini-1.5-pro":       true,
+		"gemini-2.0-flash":     true,
+		"gemini-2.0-flash-exp": true,
+		"gemini-pro":           true,
+	}
+
 	for _, model := range modelPage.Items {
 		modelName := model.Name
 
@@ -217,15 +226,22 @@ func (p *Provider) ListModels(ctx context.Context, apiKey, baseURL string) ([]mo
 				name = name[7:]
 			}
 
-			modelList = append(modelList, models.ModelInfo{
+			info := models.ModelInfo{
 				ID:          model.Name,
 				Name:        name,
 				Description: model.Description,
-			})
+				UsedInChat:  popularModelIDs[name],
+			}
+
+			if popularModelIDs[name] {
+				popularModels = append(popularModels, info)
+			} else {
+				modelList = append(modelList, info)
+			}
 		}
 	}
 
-	return modelList, nil
+	return append(popularModels, modelList...), nil
 }
 
 func float32Ptr(f float32) *float32 {

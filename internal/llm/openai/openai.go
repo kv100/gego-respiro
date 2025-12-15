@@ -161,6 +161,15 @@ func (p *Provider) ListModels(ctx context.Context, apiKey, baseURL string) ([]mo
 	}
 
 	var textModels []models.ModelInfo
+	var popularModels []models.ModelInfo
+	popularModelIDs := map[string]bool{
+		"gpt-3.5-turbo": true,
+		"gpt-4":         true,
+		"gpt-4-turbo":   true,
+		"gpt-4o":        true,
+		"gpt-4o-mini":   true,
+	}
+
 	for _, model := range modelList.Data {
 		modelID := string(model.ID)
 
@@ -181,13 +190,20 @@ func (p *Provider) ListModels(ctx context.Context, apiKey, baseURL string) ([]mo
 				continue
 			}
 
-			textModels = append(textModels, models.ModelInfo{
+			info := models.ModelInfo{
 				ID:          modelID,
 				Name:        modelID,
 				Description: fmt.Sprintf("OpenAI %s", modelID),
-			})
+				UsedInChat:  popularModelIDs[modelID],
+			}
+
+			if popularModelIDs[modelID] {
+				popularModels = append(popularModels, info)
+			} else {
+				textModels = append(textModels, info)
+			}
 		}
 	}
 
-	return textModels, nil
+	return append(popularModels, textModels...), nil
 }

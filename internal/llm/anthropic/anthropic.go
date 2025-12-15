@@ -190,15 +190,31 @@ func (p *Provider) ListModels(ctx context.Context, apiKey, baseURL string) ([]mo
 	}
 
 	var modelList []models.ModelInfo
+	var popularModels []models.ModelInfo
+	popularModelIDs := map[string]bool{
+		"claude-3-7-sonnet-20250219": true,
+		"claude-3-5-sonnet-20241022": true,
+		"claude-3-opus-20240229":     true,
+		"claude-3-5-haiku-20241022":  true,
+		"claude-3-haiku-20240307":    true,
+	}
+
 	for _, model := range response.Data {
 		if model.Type == "model" {
-			modelList = append(modelList, models.ModelInfo{
+			info := models.ModelInfo{
 				ID:          model.ID,
 				Name:        model.DisplayName,
 				Description: fmt.Sprintf("Anthropic %s (created: %s)", model.DisplayName, model.CreatedAt),
-			})
+				UsedInChat:  popularModelIDs[model.ID],
+			}
+
+			if popularModelIDs[model.ID] {
+				popularModels = append(popularModels, info)
+			} else {
+				modelList = append(modelList, info)
+			}
 		}
 	}
 
-	return modelList, nil
+	return append(popularModels, modelList...), nil
 }

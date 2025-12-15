@@ -219,6 +219,9 @@ func runLLMAdd(cmd *cobra.Command, args []string) error {
 	fmt.Println("==============================")
 	for i, model := range availableModels {
 		fmt.Printf("%d. %s", i+1, model.Name)
+		if model.UsedInChat {
+			fmt.Printf(" - Used in chat")
+		}
 		if model.Description != "" {
 			fmt.Printf(" - %s", model.Description)
 		}

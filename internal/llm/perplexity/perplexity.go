@@ -3,6 +3,8 @@ package perplexity
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"time"
 
 	pplx "github.com/sgaunet/perplexity-go/v2"
 
@@ -89,11 +91,28 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 
 	tokensUsed := resp.Usage.TotalTokens
 
+	var searchURLs []llm.SearchURL
+	searchResults := resp.GetSearchResults()
+	if len(searchResults) > 0 {
+		for index, result := range searchResults {
+			if result.URL != "" {
+				resolvedURL := resolveRedirectURL(ctx, result.URL)
+				searchURLs = append(searchURLs, llm.SearchURL{
+					SearchQuery:   llm.UnknownSearchQuery,
+					URL:           resolvedURL,
+					Title:         result.Title,
+					CitationIndex: index,
+				})
+			}
+		}
+	}
+
 	return &llm.Response{
 		Text:       content,
 		TokensUsed: tokensUsed,
 		Model:      model,
 		Provider:   "perplexity",
+		SearchURLs: searchURLs,
 	}, nil
 }
 
@@ -105,26 +124,62 @@ func (p *Provider) ListModels(ctx context.Context, apiKey, baseURL string) ([]mo
 			ID:          "sonar",
 			Name:        "Sonar",
 			Description: "Default model optimized for general use cases",
+			UsedInChat:  true,
 		},
 		{
 			ID:          "sonar-pro",
 			Name:        "Sonar Pro",
 			Description: "Advanced model for complex tasks and longer outputs",
+			UsedInChat:  true,
 		},
 		{
 			ID:          "sonar-medium",
 			Name:        "Sonar Medium",
 			Description: "Balanced model for moderate complexity tasks",
+			UsedInChat:  true,
 		},
 		{
 			ID:          "sonar-small",
 			Name:        "Sonar Small",
 			Description: "Fast and efficient model for simple tasks",
+			UsedInChat:  true,
 		},
 		{
 			ID:          "sonar-large",
 			Name:        "Sonar Large",
 			Description: "Most capable model for highly complex tasks",
+			UsedInChat:  true,
 		},
 	}, nil
+}
+
+// resolveRedirectURL follows HTTP redirects to get the actual destination URL
+func resolveRedirectURL(ctx context.Context, url string) string {
+	if url == "" {
+		return url
+	}
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return nil
+		},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
+	if err != nil {
+		return url
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return url
+	}
+	defer resp.Body.Close()
+
+	if resp.Request != nil && resp.Request.URL != nil {
+		return resp.Request.URL.String()
+	}
+
+	return url
 }
