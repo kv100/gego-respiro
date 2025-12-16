@@ -61,6 +61,14 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 		maxTokens = 1000
 	}
 
+	tools := []map[string]interface{}{
+		{
+			"type":     "web_search_20250305",
+			"name":     "web_search",
+			"max_uses": 5,
+		},
+	}
+
 	requestBody := map[string]interface{}{
 		"model": model,
 		"messages": []map[string]string{
@@ -68,6 +76,7 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 		},
 		"temperature": temperature,
 		"max_tokens":  maxTokens,
+		"tools":       tools,
 	}
 
 	jsonBody, err := json.Marshal(requestBody)
@@ -100,10 +109,8 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 	}
 
 	var anthropicResp struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-		Usage struct {
+		Content []json.RawMessage `json:"content"`
+		Usage   struct {
 			InputTokens  int `json:"input_tokens"`
 			OutputTokens int `json:"output_tokens"`
 		} `json:"usage"`
@@ -118,13 +125,119 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 		return nil, fmt.Errorf("no content returned from API")
 	}
 
+	var generatedText string
+	var searchURLs []llm.SearchURL
+	var searchQuery string
+
+	for _, contentItem := range anthropicResp.Content {
+		var contentBlock struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(contentItem, &contentBlock); err != nil {
+			continue
+		}
+
+		switch contentBlock.Type {
+		case "text":
+			var textBlock struct {
+				Type      string `json:"type"`
+				Text      string `json:"text"`
+				Citations []struct {
+					Type           string `json:"type"`
+					URL            string `json:"url"`
+					Title          string `json:"title"`
+					EncryptedIndex string `json:"encrypted_index"`
+					CitedText      string `json:"cited_text"`
+				} `json:"citations,omitempty"`
+			}
+			if err := json.Unmarshal(contentItem, &textBlock); err == nil {
+				if textBlock.Text != "" {
+					generatedText += textBlock.Text
+				}
+				for index, citation := range textBlock.Citations {
+					if citation.Type == "web_search_result_location" && citation.URL != "" {
+						resolvedURL := resolveRedirectURL(ctx, citation.URL)
+						searchURLs = append(searchURLs, llm.SearchURL{
+							SearchQuery:   searchQuery,
+							URL:           resolvedURL,
+							Title:         citation.Title,
+							CitationIndex: index,
+						})
+					}
+				}
+			}
+
+		case "server_tool_use":
+			var toolUseBlock struct {
+				Type  string `json:"type"`
+				ID    string `json:"id"`
+				Name  string `json:"name"`
+				Input struct {
+					Query string `json:"query"`
+				} `json:"input"`
+			}
+			if err := json.Unmarshal(contentItem, &toolUseBlock); err == nil {
+				if toolUseBlock.Name == "web_search" && toolUseBlock.Input.Query != "" {
+					searchQuery = toolUseBlock.Input.Query
+				}
+			}
+
+		case "web_search_tool_result":
+			var searchResultBlock struct {
+				Type      string          `json:"type"`
+				ToolUseID string          `json:"tool_use_id"`
+				Content   json.RawMessage `json:"content"`
+			}
+			if err := json.Unmarshal(contentItem, &searchResultBlock); err == nil {
+				var contentArray []json.RawMessage
+				if err := json.Unmarshal(searchResultBlock.Content, &contentArray); err == nil {
+					for _, resultItem := range contentArray {
+						var resultContent struct {
+							Type             string `json:"type"`
+							URL              string `json:"url"`
+							Title            string `json:"title"`
+							EncryptedContent string `json:"encrypted_content"`
+							PageAge          string `json:"page_age"`
+						}
+						if err := json.Unmarshal(resultItem, &resultContent); err == nil {
+							if resultContent.Type == "web_search_result" && resultContent.URL != "" {
+								resolvedURL := resolveRedirectURL(ctx, resultContent.URL)
+								searchURLs = append(searchURLs, llm.SearchURL{
+									SearchQuery:   searchQuery,
+									URL:           resolvedURL,
+									Title:         resultContent.Title,
+									CitationIndex: len(searchURLs),
+								})
+							}
+						}
+					}
+				} else {
+					var errorContent struct {
+						Type      string `json:"type"`
+						ErrorCode string `json:"error_code"`
+					}
+					if err := json.Unmarshal(searchResultBlock.Content, &errorContent); err == nil {
+						if errorContent.Type == "web_search_tool_result_error" {
+							continue
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if generatedText == "" {
+		return nil, fmt.Errorf("no text content returned from API")
+	}
+
 	totalTokens := anthropicResp.Usage.InputTokens + anthropicResp.Usage.OutputTokens
 
 	return &llm.Response{
-		Text:       anthropicResp.Content[0].Text,
+		Text:       generatedText,
 		TokensUsed: totalTokens,
 		Model:      anthropicResp.Model,
 		Provider:   "anthropic",
+		SearchURLs: searchURLs,
 	}, nil
 }
 
@@ -217,4 +330,34 @@ func (p *Provider) ListModels(ctx context.Context, apiKey, baseURL string) ([]mo
 	}
 
 	return append(popularModels, modelList...), nil
+}
+
+func resolveRedirectURL(ctx context.Context, url string) string {
+	if url == "" {
+		return url
+	}
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return nil
+		},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
+	if err != nil {
+		return url
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return url
+	}
+	defer resp.Body.Close()
+
+	if resp.Request != nil && resp.Request.URL != nil {
+		return resp.Request.URL.String()
+	}
+
+	return url
 }
