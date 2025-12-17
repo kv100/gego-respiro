@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/AI2HU/gego/internal/models"
+	"github.com/AI2HU/gego/internal/services"
 )
 
 // getStats handles GET /api/v1/stats
@@ -81,6 +82,75 @@ func (s *Server) getStats(c *gin.Context) {
 	}
 
 	s.successResponse(c, response)
+}
+
+type URLStatsResponse struct {
+	TopURLs    []*services.URLMentionStats    `json:"top_urls"`
+	TopDomains []*services.DomainMentionStats `json:"top_domains"`
+}
+
+func (s *Server) getURLStats(c *gin.Context) {
+	limitStr := c.DefaultQuery("limit", "20")
+	limit, _ := strconv.Atoi(limitStr)
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	topURLs, err := s.statsService.GetTopURLsByCitations(c.Request.Context(), limit)
+	if err != nil {
+		s.errorResponse(c, http.StatusInternalServerError, "Failed to get top URLs: "+err.Error())
+		return
+	}
+
+	topDomains, err := s.statsService.GetTopDomainsByCitations(c.Request.Context(), limit)
+	if err != nil {
+		s.errorResponse(c, http.StatusInternalServerError, "Failed to get top domains: "+err.Error())
+		return
+	}
+
+	s.successResponse(c, URLStatsResponse{
+		TopURLs:    topURLs,
+		TopDomains: topDomains,
+	})
+}
+
+func (s *Server) getQueryURLStats(c *gin.Context) {
+	limitStr := c.DefaultQuery("limit", "20")
+	limit, _ := strconv.Atoi(limitStr)
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	stats, err := s.statsService.GetQueryURLRelationships(c.Request.Context(), limit)
+	if err != nil {
+		s.errorResponse(c, http.StatusInternalServerError, "Failed to get query URL relationships: "+err.Error())
+		return
+	}
+
+	s.successResponse(c, stats)
+}
+
+func (s *Server) getKeywordDomainMatrix(c *gin.Context) {
+	keywordLimitStr := c.DefaultQuery("keyword_limit", "20")
+	domainLimitStr := c.DefaultQuery("domain_limit", "10")
+
+	keywordLimit, _ := strconv.Atoi(keywordLimitStr)
+	if keywordLimit <= 0 || keywordLimit > 200 {
+		keywordLimit = 20
+	}
+
+	domainLimit, _ := strconv.Atoi(domainLimitStr)
+	if domainLimit <= 0 || domainLimit > 100 {
+		domainLimit = 10
+	}
+
+	stats, err := s.statsService.GetKeywordDomainMatrix(c.Request.Context(), keywordLimit, domainLimit)
+	if err != nil {
+		s.errorResponse(c, http.StatusInternalServerError, "Failed to get keyword-domain matrix: "+err.Error())
+		return
+	}
+
+	s.successResponse(c, stats)
 }
 
 // healthCheck handles GET /api/v1/health

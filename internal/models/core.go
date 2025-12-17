@@ -45,6 +45,14 @@ type Schedule struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
+// SearchURL represents a URL from web search with metadata
+type SearchURL struct {
+	SearchQuery   string `json:"search_query" bson:"search_query"`
+	URL           string `json:"url" bson:"url"`
+	Title         string `json:"title" bson:"title"`
+	CitationIndex int    `json:"citation_index" bson:"citation_index"`
+}
+
 // Response represents an LLM response to a prompt
 type Response struct {
 	ID           string                 `json:"id" bson:"_id"`
@@ -59,8 +67,8 @@ type Response struct {
 	Metadata     map[string]interface{} `json:"metadata,omitempty" bson:"metadata,omitempty"`       // Additional metadata
 	ScheduleID   string                 `json:"schedule_id,omitempty" bson:"schedule_id,omitempty"`
 	TokensUsed   int                    `json:"tokens_used,omitempty" bson:"tokens_used,omitempty"`
-	LatencyMs    int64                  `json:"latency_ms,omitempty" bson:"latency_ms,omitempty"`
 	Error        string                 `json:"error,omitempty" bson:"error,omitempty"`
+	SearchURLs   []SearchURL            `json:"search_urls,omitempty" bson:"search_urls,omitempty"`
 	CreatedAt    time.Time              `json:"created_at" bson:"created_at"`
 }
 
@@ -69,4 +77,5 @@ type ModelInfo struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	UsedInChat  bool   `json:"used_in_chat,omitempty"`
 }

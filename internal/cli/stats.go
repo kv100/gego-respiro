@@ -30,6 +30,12 @@ var statsKeywordsCmd = &cobra.Command{
 	RunE:  runStatsKeywords,
 }
 
+var statsURLCmd = &cobra.Command{
+	Use:   "url",
+	Short: "View top URLs by citations",
+	RunE:  runStatsURL,
+}
+
 var statsKeywordCmd = &cobra.Command{
 	Use:   "keyword [name]",
 	Short: "View statistics for a specific keyword",
@@ -55,6 +61,7 @@ var statsRefreshCmd = &cobra.Command{
 
 func init() {
 	statsCmd.AddCommand(statsKeywordsCmd)
+	statsCmd.AddCommand(statsURLCmd)
 	statsCmd.AddCommand(statsKeywordCmd)
 	statsCmd.AddCommand(statsResetCmd)
 	statsCmd.AddCommand(statsRefreshCmd)
@@ -99,6 +106,60 @@ func runStatsKeywords(cmd *cobra.Command, args []string) error {
 	}
 
 	w.Flush()
+	return nil
+}
+
+func runStatsURL(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+
+	urls, err := statsService.GetTopURLsByCitations(ctx, statsLimit)
+	if err != nil {
+		return fmt.Errorf("failed to get top URLs: %w", err)
+	}
+
+	if len(urls) == 0 {
+		fmt.Printf("%sNo URL statistics available yet. Run some schedules first!%s\n", WarningStyle, Reset)
+		return nil
+	}
+
+	fmt.Printf("%s🔗 Top URLs by Citations%s\n", HeaderStyle, Reset)
+	fmt.Printf("%s===========================%s\n", DimStyle, Reset)
+	fmt.Println()
+
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintf(w, "%sRANK\tURL\tCITATIONS%s\n", LabelStyle, Reset)
+	fmt.Fprintf(w, "%s────\t───\t─────────%s\n", DimStyle, Reset)
+
+	for i, item := range urls {
+		displayURL := item.URL
+		if len(displayURL) > 100 {
+			displayURL = displayURL[:97] + "..."
+		}
+
+		fmt.Fprintf(w, "%s\t%s\t%s\n",
+			FormatCount(i+1),
+			FormatValue(displayURL),
+			fmt.Sprintf("%s%d%s", CountStyle, item.Citations, Reset),
+		)
+	}
+
+	w.Flush()
+
+	fmt.Println()
+	for i, item := range urls {
+		if item.Title == "" && item.SearchQuery == "" {
+			continue
+		}
+
+		fmt.Printf("%s%d.%s %s\n", CountStyle, i+1, Reset, FormatValue(item.URL))
+		if item.Title != "" {
+			fmt.Printf("   %sTitle:%s %s\n", DimStyle, Reset, FormatValue(item.Title))
+		}
+		if item.SearchQuery != "" {
+			fmt.Printf("   %sQuery:%s %s\n", DimStyle, Reset, FormatValue(item.SearchQuery))
+		}
+	}
+
 	return nil
 }
 

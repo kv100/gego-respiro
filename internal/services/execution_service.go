@@ -91,8 +91,19 @@ func (s *ExecutionService) ExecutePromptWithLLM(ctx context.Context, prompt *mod
 			LLMModel:     llmConfig.Model,
 			Temperature:  config.Temperature,
 			TokensUsed:   response.TokensUsed,
-			LatencyMs:    response.LatencyMs,
 			CreatedAt:    time.Now(),
+		}
+
+		if len(response.SearchURLs) > 0 {
+			responseModel.SearchURLs = make([]models.SearchURL, len(response.SearchURLs))
+			for i, url := range response.SearchURLs {
+				responseModel.SearchURLs[i] = models.SearchURL{
+					SearchQuery:   url.SearchQuery,
+					URL:           url.URL,
+					Title:         url.Title,
+					CitationIndex: url.CitationIndex,
+				}
+			}
 		}
 
 		if err := s.db.CreateResponse(ctx, responseModel); err != nil {

@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 
 	"github.com/AI2HU/gego/internal/llm"
@@ -16,13 +16,14 @@ import (
 
 // Provider implements the LLM Provider interface for OpenAI
 type Provider struct {
-	apiKey  string
-	baseURL string
-	client  openai.Client
+	apiKey            string
+	baseURL           string
+	client            openai.Client
+	systemInstruction string
 }
 
 // New creates a new OpenAI provider
-func New(apiKey, baseURL string) *Provider {
+func New(apiKey, baseURL, systemInstruction string) *Provider {
 	client := openai.NewClient(
 		option.WithAPIKey(apiKey),
 	)
@@ -35,9 +36,10 @@ func New(apiKey, baseURL string) *Provider {
 	}
 
 	return &Provider{
-		apiKey:  apiKey,
-		baseURL: baseURL,
-		client:  client,
+		apiKey:            apiKey,
+		baseURL:           baseURL,
+		client:            client,
+		systemInstruction: systemInstruction,
 	}
 }
 
@@ -56,8 +58,6 @@ func (p *Provider) Validate(config map[string]string) error {
 
 // Generate sends a prompt to OpenAI and returns the response
 func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Config) (*llm.Response, error) {
-	startTime := time.Now()
-
 	model := shared.ChatModelGPT3_5Turbo
 	if config.Model != "" {
 		model = shared.ChatModel(config.Model)
@@ -69,43 +69,86 @@ func (p *Provider) Generate(ctx context.Context, prompt string, config llm.Confi
 		maxTokens = 1000
 	}
 
-	chatCompletion, err := p.client.Chat.Completions.New(
-		ctx,
-		openai.ChatCompletionNewParams{
-			Model: model,
-			Messages: []openai.ChatCompletionMessageParamUnion{
-				{
-					OfUser: &openai.ChatCompletionUserMessageParam{
-						Content: openai.ChatCompletionUserMessageParamContentUnion{
-							OfString: openai.String(prompt),
-						},
-					},
-				},
-			},
-			Temperature: openai.Float(temperature),
-			MaxTokens:   openai.Int(int64(maxTokens)),
+	inputText := prompt
+	instructions := ""
+	if p.systemInstruction != "" {
+		instructions = p.systemInstruction
+	}
+
+	responseParams := responses.ResponseNewParams{
+		Model: responses.ChatModel(model),
+		Input: responses.ResponseNewParamsInputUnion{
+			OfString: openai.String(inputText),
 		},
-	)
+		Tools: []responses.ToolUnionParam{
+			responses.ToolParamOfWebSearch(responses.WebSearchToolTypeWebSearch),
+		},
+		ToolChoice: responses.ResponseNewParamsToolChoiceUnion{
+			OfToolChoiceMode: openai.Opt(responses.ToolChoiceOptionsRequired),
+		},
+		Include: []responses.ResponseIncludable{
+			"web_search_call.action.sources",
+		},
+	}
+
+	if instructions != "" {
+		responseParams.Instructions = openai.String(instructions)
+	}
+
+	modelStr := strings.ToLower(string(model))
+	supportsTemperature := !strings.HasPrefix(modelStr, "gpt-5") && !strings.HasPrefix(modelStr, "o1") && !strings.HasPrefix(modelStr, "o3")
+
+	if temperature > 0 && supportsTemperature {
+		responseParams.Temperature = openai.Float(temperature)
+	}
+
+	if maxTokens > 0 {
+		responseParams.MaxOutputTokens = openai.Int(int64(maxTokens))
+	}
+
+	resp, err := p.client.Responses.New(ctx, responseParams)
 	if err != nil {
 		return nil, fmt.Errorf("OpenAI API error: %w", err)
 	}
 
-	var generatedText string
-	if len(chatCompletion.Choices) > 0 && chatCompletion.Choices[0].Message.Content != "" {
-		generatedText = chatCompletion.Choices[0].Message.Content
+	generatedText := resp.OutputText()
+
+	var searchURLs []llm.SearchURL
+	for _, outputItem := range resp.Output {
+		if outputItem.Type == "web_search_call" {
+			searchQuery := llm.UnknownSearchQuery
+			if outputItem.Action.Query != "" {
+				searchQuery = outputItem.Action.Query
+			}
+
+			if outputItem.Action.Type == "search" || outputItem.Action.Type == "web_search" {
+				if len(outputItem.Action.Sources) > 0 {
+					for index, source := range outputItem.Action.Sources {
+						if source.URL != "" {
+							searchURLs = append(searchURLs, llm.SearchURL{
+								SearchQuery:   searchQuery,
+								URL:           source.URL,
+								Title:         "",
+								CitationIndex: index,
+							})
+						}
+					}
+				}
+			}
+		}
 	}
 
 	tokensUsed := 0
-	if chatCompletion.Usage.TotalTokens != 0 {
-		tokensUsed = int(chatCompletion.Usage.TotalTokens)
+	if resp.Usage.TotalTokens != 0 {
+		tokensUsed = int(resp.Usage.TotalTokens)
 	}
 
 	return &llm.Response{
 		Text:       generatedText,
 		TokensUsed: tokensUsed,
-		LatencyMs:  time.Since(startTime).Milliseconds(),
 		Model:      string(model),
 		Provider:   "openai",
+		SearchURLs: searchURLs,
 	}, nil
 }
 
@@ -130,6 +173,15 @@ func (p *Provider) ListModels(ctx context.Context, apiKey, baseURL string) ([]mo
 	}
 
 	var textModels []models.ModelInfo
+	var popularModels []models.ModelInfo
+	popularModelIDs := map[string]bool{
+		"gpt-3.5-turbo": true,
+		"gpt-4":         true,
+		"gpt-4-turbo":   true,
+		"gpt-4o":        true,
+		"gpt-4o-mini":   true,
+	}
+
 	for _, model := range modelList.Data {
 		modelID := string(model.ID)
 
@@ -150,13 +202,20 @@ func (p *Provider) ListModels(ctx context.Context, apiKey, baseURL string) ([]mo
 				continue
 			}
 
-			textModels = append(textModels, models.ModelInfo{
+			info := models.ModelInfo{
 				ID:          modelID,
 				Name:        modelID,
 				Description: fmt.Sprintf("OpenAI %s", modelID),
-			})
+				UsedInChat:  popularModelIDs[modelID],
+			}
+
+			if popularModelIDs[modelID] {
+				popularModels = append(popularModels, info)
+			} else {
+				textModels = append(textModels, info)
+			}
 		}
 	}
 
-	return textModels, nil
+	return append(popularModels, textModels...), nil
 }
