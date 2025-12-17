@@ -240,6 +240,66 @@ type ProviderStats struct {
 	UniqueLLMs        map[string]bool `json:"-"`
 }
 
+// GetTopURLsByCitations returns URLs ranked by how often they are cited
+func (s *StatsService) GetTopURLsByCitations(ctx context.Context, limit int) ([]*URLMentionStats, error) {
+	responses, err := s.db.ListResponses(ctx, shared.ResponseFilter{Limit: 10000})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get responses: %w", err)
+	}
+
+	urlStats := make(map[string]*URLMentionStats)
+
+	for _, response := range responses {
+		for _, url := range response.SearchURLs {
+			if url.URL == "" {
+				continue
+			}
+
+			stats, exists := urlStats[url.URL]
+			if !exists {
+				stats = &URLMentionStats{
+					URL: url.URL,
+				}
+				if url.Title != "" {
+					stats.Title = url.Title
+				}
+				if url.SearchQuery != "" {
+					stats.SearchQuery = url.SearchQuery
+				}
+				urlStats[url.URL] = stats
+			}
+
+			stats.Citations++
+		}
+	}
+
+	var results []*URLMentionStats
+	for _, stats := range urlStats {
+		results = append(results, stats)
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Citations == results[j].Citations {
+			return results[i].URL < results[j].URL
+		}
+		return results[i].Citations > results[j].Citations
+	})
+
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
+}
+
+// URLMentionStats represents citation statistics for a URL
+type URLMentionStats struct {
+	URL         string `json:"url"`
+	Title       string `json:"title,omitempty"`
+	SearchQuery string `json:"search_query,omitempty"`
+	Citations   int    `json:"citations"`
+}
+
 // GetTopPromptsByMentions returns prompts ranked by keyword mentions
 func (s *StatsService) GetTopPromptsByMentions(ctx context.Context, limit int) ([]*PromptMentionStats, error) {
 	responses, err := s.db.ListResponses(ctx, shared.ResponseFilter{Limit: 10000})
