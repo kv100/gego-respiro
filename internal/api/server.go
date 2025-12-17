@@ -90,6 +90,9 @@ func (s *Server) setupRoutes() {
 	// api.DELETE("/schedules/:id", s.deleteSchedule)
 
 	api.GET("/stats", s.getStats)
+	api.GET("/stats/urls", s.getURLStats)
+	api.GET("/stats/query-urls", s.getQueryURLStats)
+	api.GET("/stats/keyword-domains", s.getKeywordDomainMatrix)
 
 	api.POST("/search", s.search)
 

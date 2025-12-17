@@ -3,10 +3,13 @@ package services
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/AI2HU/gego/internal/db"
+	"github.com/AI2HU/gego/internal/llm"
 	"github.com/AI2HU/gego/internal/models"
 	"github.com/AI2HU/gego/internal/shared"
 )
@@ -298,6 +301,285 @@ type URLMentionStats struct {
 	Title       string `json:"title,omitempty"`
 	SearchQuery string `json:"search_query,omitempty"`
 	Citations   int    `json:"citations"`
+}
+
+type DomainMentionStats struct {
+	Domain         string `json:"domain"`
+	Citations      int    `json:"citations"`
+	UniqueURLCount int    `json:"unique_url_count"`
+}
+
+type QueryURLItem struct {
+	URL       string `json:"url"`
+	Title     string `json:"title,omitempty"`
+	Citations int    `json:"citations"`
+}
+
+type QueryURLStats struct {
+	Query          string         `json:"query"`
+	TotalCitations int            `json:"total_citations"`
+	URLs           []QueryURLItem `json:"urls"`
+}
+
+type DomainCount struct {
+	Domain string `json:"domain"`
+	Count  int    `json:"count"`
+}
+
+type KeywordDomainStats struct {
+	Keyword string        `json:"keyword"`
+	Total   int           `json:"total"`
+	Domains []DomainCount `json:"domains"`
+}
+
+func (s *StatsService) GetTopDomainsByCitations(ctx context.Context, limit int) ([]*DomainMentionStats, error) {
+	responses, err := s.db.ListResponses(ctx, shared.ResponseFilter{Limit: 10000})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get responses: %w", err)
+	}
+
+	domainStats := make(map[string]*DomainMentionStats)
+	domainURLs := make(map[string]map[string]bool)
+
+	for _, response := range responses {
+		for _, u := range response.SearchURLs {
+			if u.URL == "" {
+				continue
+			}
+
+			domain := extractDomain(u.URL)
+			if domain == "" {
+				continue
+			}
+
+			if domainStats[domain] == nil {
+				domainStats[domain] = &DomainMentionStats{
+					Domain:    domain,
+					Citations: 0,
+				}
+				domainURLs[domain] = make(map[string]bool)
+			}
+
+			stats := domainStats[domain]
+			stats.Citations++
+			domainURLs[domain][u.URL] = true
+		}
+	}
+
+	var results []*DomainMentionStats
+	for domain, stats := range domainStats {
+		stats.UniqueURLCount = len(domainURLs[domain])
+		results = append(results, stats)
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Citations == results[j].Citations {
+			return results[i].Domain < results[j].Domain
+		}
+		return results[i].Citations > results[j].Citations
+	})
+
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
+}
+
+func (s *StatsService) GetQueryURLRelationships(ctx context.Context, limit int) ([]*QueryURLStats, error) {
+	responses, err := s.db.ListResponses(ctx, shared.ResponseFilter{Limit: 10000})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get responses: %w", err)
+	}
+
+	queryURLItems := make(map[string]map[string]*QueryURLItem)
+	queryTotals := make(map[string]int)
+
+	for _, response := range responses {
+		for _, u := range response.SearchURLs {
+			if u.URL == "" {
+				continue
+			}
+			if u.SearchQuery == "" || u.SearchQuery == llm.UnknownSearchQuery {
+				continue
+			}
+
+			query := u.SearchQuery
+
+			if queryURLItems[query] == nil {
+				queryURLItems[query] = make(map[string]*QueryURLItem)
+			}
+
+			urlItems := queryURLItems[query]
+			item, exists := urlItems[u.URL]
+			if !exists {
+				item = &QueryURLItem{
+					URL:   u.URL,
+					Title: u.Title,
+				}
+				urlItems[u.URL] = item
+			}
+
+			item.Citations++
+			queryTotals[query]++
+		}
+	}
+
+	var results []*QueryURLStats
+	for query, urls := range queryURLItems {
+		items := make([]QueryURLItem, 0, len(urls))
+		for _, item := range urls {
+			items = append(items, *item)
+		}
+
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].Citations == items[j].Citations {
+				return items[i].URL < items[j].URL
+			}
+			return items[i].Citations > items[j].Citations
+		})
+
+		results = append(results, &QueryURLStats{
+			Query:          query,
+			TotalCitations: queryTotals[query],
+			URLs:           items,
+		})
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].TotalCitations == results[j].TotalCitations {
+			return results[i].Query < results[j].Query
+		}
+		return results[i].TotalCitations > results[j].TotalCitations
+	})
+
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
+}
+
+func (s *StatsService) GetKeywordDomainMatrix(ctx context.Context, keywordLimit, domainLimit int) ([]*KeywordDomainStats, error) {
+	responses, err := s.db.ListResponses(ctx, shared.ResponseFilter{Limit: 10000})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get responses: %w", err)
+	}
+
+	matrix := make(map[string]map[string]int)
+
+	for _, response := range responses {
+		if len(response.SearchURLs) == 0 {
+			continue
+		}
+
+		keywords := shared.ExtractCapitalizedWords(response.ResponseText)
+		if len(keywords) == 0 {
+			continue
+		}
+
+		keywordSet := make(map[string]bool)
+		for _, kw := range keywords {
+			kw = strings.TrimSpace(kw)
+			if kw == "" {
+				continue
+			}
+			keywordSet[kw] = true
+		}
+
+		if len(keywordSet) == 0 {
+			continue
+		}
+
+		domainSet := make(map[string]bool)
+		for _, u := range response.SearchURLs {
+			if u.URL == "" {
+				continue
+			}
+			domain := extractDomain(u.URL)
+			if domain == "" {
+				continue
+			}
+			domainSet[domain] = true
+		}
+
+		if len(domainSet) == 0 {
+			continue
+		}
+
+		for kw := range keywordSet {
+			if matrix[kw] == nil {
+				matrix[kw] = make(map[string]int)
+			}
+			for domain := range domainSet {
+				matrix[kw][domain]++
+			}
+		}
+	}
+
+	var results []*KeywordDomainStats
+	for kw, domains := range matrix {
+		var (
+			domainCounts []DomainCount
+			total        int
+		)
+
+		for domain, count := range domains {
+			total += count
+			domainCounts = append(domainCounts, DomainCount{
+				Domain: domain,
+				Count:  count,
+			})
+		}
+
+		sort.Slice(domainCounts, func(i, j int) bool {
+			if domainCounts[i].Count == domainCounts[j].Count {
+				return domainCounts[i].Domain < domainCounts[j].Domain
+			}
+			return domainCounts[i].Count > domainCounts[j].Count
+		})
+
+		if domainLimit > 0 && len(domainCounts) > domainLimit {
+			domainCounts = domainCounts[:domainLimit]
+		}
+
+		results = append(results, &KeywordDomainStats{
+			Keyword: kw,
+			Total:   total,
+			Domains: domainCounts,
+		})
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Total == results[j].Total {
+			return results[i].Keyword < results[j].Keyword
+		}
+		return results[i].Total > results[j].Total
+	})
+
+	if keywordLimit > 0 && len(results) > keywordLimit {
+		results = results[:keywordLimit]
+	}
+
+	return results, nil
+}
+
+func extractDomain(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+
+	host := strings.ToLower(u.Host)
+	if host == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(host, "www.") {
+		host = host[4:]
+	}
+
+	return host
 }
 
 // GetTopPromptsByMentions returns prompts ranked by keyword mentions
