@@ -1,0 +1,40 @@
+services:
+  mongodb:
+    image: mongo:7
+    container_name: gego-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  gego:
+    build: .
+    container_name: gego
+    restart: unless-stopped
+    ports:
+      - "8989:8989"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - gego_data:/app/data
+      - ./config/config.yaml:/app/config/config.yaml:ro
+      - ./entrypoint.sh:/app/entrypoint.sh:ro
+      - gego_logs:/app/logs
+    command: ["/bin/sh", "/app/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8989/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  mongodb_data:
+  gego_data:
+  gego_logs:
