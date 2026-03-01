@@ -125,7 +125,10 @@ func runAPI(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("✅ Database migrations completed successfully!")
 
-	server := api.NewServer(database, selectedCORSOrigin)
+	if err := initializeLLMProviders(ctx); err != nil {
+		fmt.Printf("Warning: failed to initialize LLM providers: %v\n", err)
+	}
+	server := api.NewServer(database, selectedCORSOrigin, llmRegistry)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)

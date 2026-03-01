@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/AI2HU/gego/internal/db"
+	"github.com/AI2HU/gego/internal/llm"
 	"github.com/AI2HU/gego/internal/models"
 	"github.com/AI2HU/gego/internal/services"
 )
@@ -15,6 +16,7 @@ import (
 // Server represents the API server
 type Server struct {
 	db              db.Database
+	llmRegistry     *llm.Registry
 	llmService      *services.LLMService
 	promptService   *services.PromptManagementService
 	scheduleService *services.ScheduleService
@@ -25,7 +27,7 @@ type Server struct {
 }
 
 // NewServer creates a new API server
-func NewServer(database db.Database, corsOrigin string) *Server {
+func NewServer(database db.Database, corsOrigin string, registry *llm.Registry) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.Default()
@@ -54,6 +56,7 @@ func NewServer(database db.Database, corsOrigin string) *Server {
 
 	server := &Server{
 		db:              database,
+		llmRegistry:     registry,
 		llmService:      services.NewLLMService(database),
 		promptService:   services.NewPromptManagementService(database),
 		scheduleService: services.NewScheduleService(database),
@@ -95,6 +98,7 @@ func (s *Server) setupRoutes() {
 	api.GET("/stats/keyword-domains", s.getKeywordDomainMatrix)
 
 	api.POST("/search", s.search)
+	api.POST("/run", s.runExecution)
 
 	api.GET("/health", s.healthCheck)
 }
