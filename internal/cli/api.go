@@ -13,6 +13,12 @@ import (
 	"github.com/AI2HU/gego/internal/api"
 	"github.com/AI2HU/gego/internal/config"
 	"github.com/AI2HU/gego/internal/db"
+	"github.com/AI2HU/gego/internal/llm"
+	"github.com/AI2HU/gego/internal/llm/anthropic"
+	"github.com/AI2HU/gego/internal/llm/google"
+	"github.com/AI2HU/gego/internal/llm/ollama"
+	"github.com/AI2HU/gego/internal/llm/openai"
+	"github.com/AI2HU/gego/internal/llm/perplexity"
 	"github.com/AI2HU/gego/internal/models"
 	"github.com/AI2HU/gego/internal/shared"
 )
@@ -125,10 +131,36 @@ func runAPI(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("✅ Database migrations completed successfully!")
 
-	if err := initializeLLMProviders(ctx); err != nil {
-		fmt.Printf("Warning: failed to initialize LLM providers: %v\n", err)
+	registry := llm.NewRegistry()
+	registry.Register(openai.New("", "", config.GetSystemInstruction(cfg, config.ProviderChatGPT)))
+	registry.Register(anthropic.New("", ""))
+	registry.Register(ollama.New(""))
+	registry.Register(google.New("", "", config.GetSystemInstruction(cfg, config.ProviderGemini)))
+	registry.Register(perplexity.New("", ""))
+
+	llms, err := database.ListLLMs(ctx, nil)
+	if err == nil {
+		for _, llmCfg := range llms {
+			var provider llm.Provider
+			switch llmCfg.Provider {
+			case "openai":
+				provider = openai.New(llmCfg.APIKey, llmCfg.BaseURL, config.GetSystemInstruction(cfg, config.ProviderChatGPT))
+			case "anthropic":
+				provider = anthropic.New(llmCfg.APIKey, llmCfg.BaseURL)
+			case "ollama":
+				provider = ollama.New(llmCfg.BaseURL)
+			case "google":
+				provider = google.New(llmCfg.APIKey, llmCfg.BaseURL, config.GetSystemInstruction(cfg, config.ProviderGemini))
+			case "perplexity":
+				provider = perplexity.New(llmCfg.APIKey, llmCfg.BaseURL)
+			}
+			if provider != nil {
+				registry.Register(provider)
+			}
+		}
 	}
-	server := api.NewServer(database, selectedCORSOrigin, llmRegistry)
+
+	server := api.NewServer(database, selectedCORSOrigin, registry)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
